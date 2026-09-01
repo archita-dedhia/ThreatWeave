@@ -1,0 +1,6 @@
+{
+  "name": "UrbanSOC",
+  "description": "Agentic AI Cybersecurity Assistant for Automated Threat Investigation and Incident Response",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
