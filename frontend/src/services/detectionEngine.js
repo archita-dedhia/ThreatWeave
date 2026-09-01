@@ -1,24 +1,8 @@
-import {
-  SecurityEvent,
-  Threat,
-  EvidenceItem,
-  RiskScoreBreakdown,
-  AIExplanation,
-  ResponseAction,
-  RiskLevel,
-  SeverityLevel,
-  AgentRunLog,
-  AgentMessageBusItem,
-  SystemSettings,
-  IncidentReport,
-  Incident,
-} from '../types';
-
 /**
  * Normalizes raw log string into structured SecurityEvent array
  */
-export function parseRawLogs(rawText: string, format: 'csv' | 'json' | 'txt' | 'auto'): SecurityEvent[] {
-  const trimmed = rawText.trim();
+export function parseRawLogs(rawText, format = 'auto') {
+  const trimmed = (rawText || '').trim();
   if (!trimmed) return [];
 
   // Try JSON first if auto or format is json
@@ -34,12 +18,12 @@ export function parseRawLogs(rawText: string, format: 'csv' | 'json' | 'txt' | '
         user: item.user || item.username || 'system',
         event_type: item.event_type || item.type || 'SYSTEM_EVENT',
         action: item.action || 'LOG',
-        status: (item.status?.toUpperCase() || 'SUCCESS') as any,
+        status: item.status ? item.status.toUpperCase() : 'SUCCESS',
         process: item.process,
         command: item.command,
         file: item.file,
         bytes_transferred: Number(item.bytes_transferred || item.bytes || 0),
-        severity: (item.severity?.toLowerCase() || 'info') as SeverityLevel,
+        severity: item.severity ? item.severity.toLowerCase() : 'info',
         raw_log: JSON.stringify(item),
       }));
     } catch {
@@ -53,12 +37,12 @@ export function parseRawLogs(rawText: string, format: 'csv' | 'json' | 'txt' | '
     const headerLine = lines[0].toLowerCase();
     if (headerLine.includes('timestamp') || headerLine.includes('source_ip') || headerLine.includes('event_type')) {
       const headers = lines[0].split(',').map((h) => h.trim());
-      const events: SecurityEvent[] = [];
+      const events = [];
       for (let i = 1; i < lines.length; i++) {
         const line = lines[i];
         if (!line.trim()) continue;
         const cols = line.split(',').map((c) => c.trim());
-        const row: Record<string, string> = {};
+        const row = {};
         headers.forEach((h, idx) => {
           row[h] = cols[idx] || '';
         });
@@ -71,12 +55,12 @@ export function parseRawLogs(rawText: string, format: 'csv' | 'json' | 'txt' | '
           user: row.user || row.username || 'unknown',
           event_type: row.event_type || 'AUTH_EVENT',
           action: row.action || 'EXEC',
-          status: (row.status?.toUpperCase() || 'SUCCESS') as any,
+          status: row.status ? row.status.toUpperCase() : 'SUCCESS',
           process: row.process || undefined,
           command: row.command || undefined,
           file: row.file || undefined,
           bytes_transferred: row.bytes_transferred ? Number(row.bytes_transferred) : 0,
-          severity: (row.severity?.toLowerCase() || 'info') as SeverityLevel,
+          severity: row.severity ? row.severity.toLowerCase() : 'info',
           raw_log: line,
         });
       }
@@ -86,10 +70,10 @@ export function parseRawLogs(rawText: string, format: 'csv' | 'json' | 'txt' | '
 
   // Syslog / Generic TXT line parser
   return lines.map((line, idx) => {
-    let severity: SeverityLevel = 'info';
+    let severity = 'info';
     let event_type = 'SYSTEM_LOG';
     let isSuspicious = false;
-    const suspReasons: string[] = [];
+    const suspReasons = [];
 
     const lower = line.toLowerCase();
     if (lower.includes('failed password') || lower.includes('auth_failed') || lower.includes('failure')) {
@@ -148,17 +132,9 @@ export function parseRawLogs(rawText: string, format: 'csv' | 'json' | 'txt' | '
  * Analyzes normalized security events, detects heuristics and statistical anomalies,
  * flags indicators, assigns severity, and emits suspicious events envelope.
  */
-export function runLogAnalysisAgent(
-  events: SecurityEvent[],
-  _settings?: SystemSettings
-): {
-  enrichedEvents: SecurityEvent[];
-  suspiciousEvents: SecurityEvent[];
-  logs: AgentRunLog[];
-  metrics: { parsed: number; suspicious: number; highSeverity: number; runtimeMs: number };
-} {
+export function runLogAnalysisAgent(events = [], _settings) {
   const startTime = performance.now();
-  const logs: AgentRunLog[] = [];
+  const logs = [];
 
   logs.push({
     id: `LOG-${Date.now()}-1`,
@@ -168,12 +144,12 @@ export function runLogAnalysisAgent(
     message: `Initialized ingestion stream: Parsing and normalizing ${events.length} security log entries.`,
   });
 
-  const enrichedEvents: SecurityEvent[] = [];
-  const suspiciousEvents: SecurityEvent[] = [];
+  const enrichedEvents = [];
+  const suspiciousEvents = [];
 
   // Group by user and source_ip to detect frequency bursts
-  const userFailedLogins: Record<string, SecurityEvent[]> = {};
-  const ipActivity: Record<string, SecurityEvent[]> = {};
+  const userFailedLogins = {};
+  const ipActivity = {};
 
   events.forEach((evt) => {
     if (evt.event_type === 'AUTH_FAILED') {
@@ -185,7 +161,7 @@ export function runLogAnalysisAgent(
   });
 
   events.forEach((evt) => {
-    const reasons: string[] = evt.suspicious_reasons ? [...evt.suspicious_reasons] : [];
+    const reasons = evt.suspicious_reasons ? [...evt.suspicious_reasons] : [];
     let isSuspicious = evt.is_suspicious || false;
     let severity = evt.severity;
 
@@ -246,7 +222,6 @@ export function runLogAnalysisAgent(
 
     // Rule 7: Massive outbound exfiltration
     if ((evt.bytes_transferred || 0) > 10000000) {
-      // >10MB
       const mb = Math.round((evt.bytes_transferred || 0) / (1024 * 1024));
       isSuspicious = true;
       reasons.push(`Anomalous large outbound data transfer (${mb} MB)`);
@@ -256,7 +231,7 @@ export function runLogAnalysisAgent(
     // Deduplicate reasons
     const uniqueReasons = Array.from(new Set(reasons));
 
-    const enriched: SecurityEvent = {
+    const enriched = {
       ...evt,
       severity,
       is_suspicious: isSuspicious,
@@ -309,17 +284,9 @@ export function runLogAnalysisAgent(
  * Correlates suspicious events across temporal chains, maps to MITRE ATT&CK,
  * determines risk scores, generates explainable reasoning & evidence, and produces actionable response playbooks.
  */
-export function runThreatInvestigationAgent(
-  suspiciousEvents: SecurityEvent[],
-  allEvents: SecurityEvent[],
-  _settings?: SystemSettings
-): {
-  threats: Threat[];
-  logs: AgentRunLog[];
-  messages: AgentMessageBusItem[];
-} {
-  const logs: AgentRunLog[] = [];
-  const messages: AgentMessageBusItem[] = [];
+export function runThreatInvestigationAgent(suspiciousEvents = [], allEvents = [], _settings) {
+  const logs = [];
+  const messages = [];
 
   logs.push({
     id: `INV-${Date.now()}-1`,
@@ -339,7 +306,7 @@ export function runThreatInvestigationAgent(
     data: { event_ids: suspiciousEvents.map((e) => e.id) },
   });
 
-  const threats: Threat[] = [];
+  const threats = [];
 
   // CORRELATION PATTERN 1: Brute Force & Service Account Compromise
   const svcBackupEvents = suspiciousEvents.filter((e) => e.user === 'svc_backup' || e.source_ip === '185.220.101.5');
@@ -350,9 +317,9 @@ export function runThreatInvestigationAgent(
 
     if (hasAuthFails && hasAuthSuccess) {
       const riskScore = hasPrivEsc ? 94 : 82;
-      const riskLevel: RiskLevel = hasPrivEsc ? 'CRITICAL' : 'HIGH';
+      const riskLevel = hasPrivEsc ? 'CRITICAL' : 'HIGH';
 
-      const evidence: EvidenceItem[] = svcBackupEvents.map((evt, idx) => ({
+      const evidence = svcBackupEvents.map((evt, idx) => ({
         id: `EVD-01-${idx + 1}`,
         title: `${evt.event_type}: ${evt.action} on ${evt.destination_ip}`,
         event_id: evt.id,
@@ -365,7 +332,7 @@ export function runThreatInvestigationAgent(
         severity: evt.severity,
       }));
 
-      const riskBreakdown: RiskScoreBreakdown = {
+      const riskBreakdown = {
         base_score: riskScore,
         factors: [
           {
@@ -397,7 +364,7 @@ export function runThreatInvestigationAgent(
           'Critical risk rating assigned due to confirmed progression from external password spraying to valid session acquisition and immediate root administrative takeover.',
       };
 
-      const explanation: AIExplanation = {
+      const explanation = {
         what_happened:
           'An external actor at IP address 185.220.101.5 launched a high-velocity automated dictionary brute-force attack against the SSH service on AUTH-SRV-01 (10.0.1.15). After five failed attempts, the actor authenticated successfully as svc_backup and immediately escalated privileges to root via sudo.',
         why_suspicious:
@@ -408,7 +375,7 @@ export function runThreatInvestigationAgent(
         attack_vector_summary: 'External SSH Credential Guessing → Service Account Takeover → Sudo Root Elevation',
       };
 
-      const recommendations: ResponseAction[] = [
+      const recommendations = [
         {
           id: 'ACT-01-1',
           category: 'Immediate Actions',
@@ -483,7 +450,7 @@ export function runThreatInvestigationAgent(
   // CORRELATION PATTERN 2: Suspicious PowerShell Activity & Lateral Staging
   const psEvents = suspiciousEvents.filter((e) => e.user === 'j.miller' || e.destination_ip === '194.26.29.112' || (e.process && e.process.includes('powershell')));
   if (psEvents.length >= 2) {
-    const evidence: EvidenceItem[] = psEvents.map((evt, idx) => ({
+    const evidence = psEvents.map((evt, idx) => ({
       id: `EVD-02-${idx + 1}`,
       title: `${evt.event_type}: ${evt.action} by ${evt.user}`,
       event_id: evt.id,
@@ -496,7 +463,7 @@ export function runThreatInvestigationAgent(
       severity: evt.severity,
     }));
 
-    const riskBreakdown: RiskScoreBreakdown = {
+    const riskBreakdown = {
       base_score: 88,
       factors: [
         {
@@ -521,7 +488,7 @@ export function runThreatInvestigationAgent(
       justification: 'High risk rating assigned due to confirmed multi-stage fileless execution chain dropping a disguised executable into user temp storage.',
     };
 
-    const explanation: AIExplanation = {
+    const explanation = {
       what_happened:
         'A user session for j.miller on WORKSTATION-04 spawned a hidden PowerShell process with ExecutionPolicy Bypass. The command downloaded a remote stager script (payload.ps1) from 194.26.29.112, dropped a masqueraded payload named svchost_update.exe into AppData\\Local\\Temp, and executed it with injection flags.',
       why_suspicious:
@@ -532,7 +499,7 @@ export function runThreatInvestigationAgent(
       attack_vector_summary: 'Encoded PowerShell Stager → Remote C2 Ingress → Masqueraded Temp Execution',
     };
 
-    const recommendations: ResponseAction[] = [
+    const recommendations = [
       {
         id: 'ACT-02-1',
         category: 'Immediate Actions',
@@ -596,7 +563,7 @@ export function runThreatInvestigationAgent(
   // CORRELATION PATTERN 3: Unusual Access & Data Exfiltration
   const exfilEvents = suspiciousEvents.filter((e) => e.user === 'c.ross' || e.destination_ip === '198.51.100.77' || (e.bytes_transferred || 0) > 10000000);
   if (exfilEvents.length >= 2) {
-    const evidence: EvidenceItem[] = exfilEvents.map((evt, idx) => ({
+    const evidence = exfilEvents.map((evt, idx) => ({
       id: `EVD-03-${idx + 1}`,
       title: `${evt.event_type}: ${evt.action} on ${evt.file || evt.destination_ip}`,
       event_id: evt.id,
@@ -609,7 +576,7 @@ export function runThreatInvestigationAgent(
       severity: evt.severity,
     }));
 
-    const riskBreakdown: RiskScoreBreakdown = {
+    const riskBreakdown = {
       base_score: 96,
       factors: [
         {
@@ -634,7 +601,7 @@ export function runThreatInvestigationAgent(
       justification: 'Critical risk rating assigned due to confirmed unauthorized staging and outbound transmission of classified customer and financial databases.',
     };
 
-    const explanation: AIExplanation = {
+    const explanation = {
       what_happened:
         'User account c.ross initiated a VPN connection during off-hours (02:22 AM) from an abnormal foreign IP (103.152.18.34). Upon logging into DB-SRV-PROD, the account performed a bulk database export of Customer_Vault_DB.bak, created a compressed archive of executive financial spreadsheets, and transmitted 845 MB of data via SFTP to an unapproved external server (198.51.100.77).',
       why_suspicious:
@@ -645,7 +612,7 @@ export function runThreatInvestigationAgent(
       attack_vector_summary: 'Anomalous VPN Ingress → Sensitive DB Export → SFTP External Exfiltration (845 MB)',
     };
 
-    const recommendations: ResponseAction[] = [
+    const recommendations = [
       {
         id: 'ACT-03-1',
         category: 'Immediate Actions',
@@ -718,7 +685,7 @@ export function runThreatInvestigationAgent(
 
   // If no predefined scenario matched but there are remaining suspicious events, create generic correlated threat
   if (threats.length === 0 && suspiciousEvents.length > 0) {
-    const genericEvidence: EvidenceItem[] = suspiciousEvents.slice(0, 5).map((evt, idx) => ({
+    const genericEvidence = suspiciousEvents.slice(0, 5).map((evt, idx) => ({
       id: `EVD-GEN-${idx + 1}`,
       title: `${evt.event_type} on ${evt.destination_ip}`,
       event_id: evt.id,
@@ -811,7 +778,7 @@ export function runThreatInvestigationAgent(
 /**
  * Builds formal Incident Report matching SIH 2026 specifications
  */
-export function generateReportFromThreat(incident: Incident, threat: Threat, allEvents: SecurityEvent[]): IncidentReport {
+export function generateReportFromThreat(incident, threat, allEvents = []) {
   const correlatedEvents = allEvents.filter((e) => threat.correlated_event_ids.includes(e.id));
 
   return {
