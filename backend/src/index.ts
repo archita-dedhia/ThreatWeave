@@ -11,6 +11,35 @@ const PORT = process.env.PORT || 5000;
 app.use(express.json({ limit: '50mb' }));
 app.use(express.urlencoded({ extended: true, limit: '50mb' }));
 
+const CREWAI_BASE_URL = process.env.CREWAI_BASE_URL || '';
+const CREWAI_API_TOKEN = process.env.CREWAI_API_TOKEN || '';
+const crewAIConfigured = !!(CREWAI_BASE_URL && CREWAI_API_TOKEN);
+
+const crewaiFetch = async (path: string, options: RequestInit = {}, timeoutMs = 120000) => {
+  if (!crewAIConfigured) {
+    throw new Error('CrewAI not configured: missing CREWAI_BASE_URL or CREWAI_API_TOKEN');
+  }
+  const url = `${CREWAI_BASE_URL.replace(/\/$/, '')}${path.startsWith('/') ? path : '/' + path}`;
+  const controller = new AbortController();
+  const t = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    const res = await fetch(url, {
+      ...options,
+      signal: controller.signal,
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${CREWAI_API_TOKEN}`,
+        ...(options.headers || {}),
+      },
+    });
+    clearTimeout(t);
+    return res;
+  } catch (err) {
+    clearTimeout(t);
+    throw err;
+  }
+};
+
 app.use((req, res, next) => {
   res.header('Access-Control-Allow-Origin', '*');
   res.header('Access-Control-Allow-Headers', 'Origin, X-Requested-With, Content-Type, Accept');
@@ -153,6 +182,11 @@ app.get('/api/health', (req, res) => {
     timestamp: new Date().toISOString(),
     dbConnected,
     mongoUriConfigured: !!mongoUri,
+    crewai: {
+      configured: crewAIConfigured,
+      base_url: CREWAI_BASE_URL || 'not set',
+      token_configured: !!CREWAI_API_TOKEN,
+    },
   });
 });
 
@@ -165,6 +199,9 @@ app.get('/api', (req, res) => {
       incidents: '/api/incidents',
       threats: '/api/threats',
       events: '/api/events',
+      crewai_status: '/api/crewai-status',
+      crewai_run_pipeline: '/api/crewai/run-pipeline',
+      crewai_generate_report: '/api/crewai/generate-report',
     },
   });
 });
@@ -174,6 +211,206 @@ app.get('/api/db-status', (req, res) => {
     connected: dbConnected,
     mongoUri: mongoUri ? mongoUri.split('@')[1] || 'configured' : 'not configured',
   });
+});
+
+app.get('/api/crewai-status', async (req, res) => {
+  try {
+    if (!crewAIConfigured) {
+      return res.json({
+        configured: false,
+        connected: false,
+        base_url: CREWAI_BASE_URL || 'not set',
+        token_configured: !!CREWAI_API_TOKEN,
+        error: 'CrewAI credentials not configured in .env',
+      });
+    }
+    let reachable = false;
+    let detail: any = null;
+    try {
+      const probe = await crewaiFetch('/health', { method: 'GET' }, 8000);
+      reachable = probe.ok;
+      try { detail = await probe.json().catch(() => null); } catch {}
+    } catch (probeErr: any) {
+      detail = probeErr?.message || 'Probe request failed';
+      try {
+        const probe2 = await crewaiFetch('/', { method: 'GET' }, 8000);
+        reachable = probe2.ok;
+      } catch {}
+    }
+    res.json({
+      configured: true,
+      connected: reachable,
+      base_url: CREWAI_BASE_URL,
+      token_configured: true,
+      detail,
+    });
+  } catch (err: any) {
+    res.json({
+      configured: crewAIConfigured,
+      connected: false,
+      base_url: CREWAI_BASE_URL,
+      token_configured: !!CREWAI_API_TOKEN,
+      error: err?.message || 'Unknown error',
+    });
+  }
+});
+
+app.post('/api/crewai/run-pipeline', async (req, res) => {
+  try {
+    if (!crewAIConfigured) {
+      return res.status(503).json({
+        success: false,
+        error: 'CrewAI not configured. Set CREWAI_BASE_URL and CREWAI_API_TOKEN in backend/.env',
+        fallback: true,
+      });
+    }
+    const { events, threats, incidents, config } = req.body || {};
+    const payload = {
+      source: 'ThreatWeave SIH-26 Platform',
+      generated_at: new Date().toISOString(),
+      events: events || [],
+      threats: threats || [],
+      incidents: incidents || [],
+      config: config || {
+        generate_pdf: true,
+        generate_markdown: true,
+        include_mitre_mapping: true,
+        include_evidence: true,
+        include_remediation_playbooks: true,
+      },
+    };
+
+    let crewaiResult: any = null;
+    let crewaiError: string | null = null;
+
+    const tryPaths = [
+      { path: '/api/v1/pipelines/security-incident-pipeline-v1/execute', method: 'POST' },
+      { path: '/pipelines/security-incident-pipeline-v1/execute', method: 'POST' },
+      { path: '/api/v1/run/security-incident-pipeline-v1', method: 'POST' },
+      { path: '/runs', method: 'POST' },
+      { path: '/execute', method: 'POST' },
+    ];
+
+    for (const endpoint of tryPaths) {
+      try {
+        const response = await crewaiFetch(endpoint.path, {
+          method: endpoint.method,
+          body: JSON.stringify(payload),
+        }, 180000);
+        if (response.ok) {
+          crewaiResult = await response.json().catch(async () => await response.text());
+          break;
+        } else {
+          const statusText = `${response.status} ${response.statusText}`;
+          let errBody: any = null;
+          try { errBody = await response.text(); } catch {}
+          crewaiError = `${endpoint.path} -> ${statusText}${errBody ? ': ' + String(errBody).slice(0, 200) : ''}`;
+        }
+      } catch (pathErr: any) {
+        if (!crewaiError) crewaiError = pathErr?.message || 'Request failed';
+      }
+    }
+
+    if (crewaiResult !== null) {
+      return res.json({
+        success: true,
+        source: 'crewai',
+        result: crewaiResult,
+        pipeline_id: typeof crewaiResult === 'object' ? (crewaiResult.id || crewaiResult.run_id || crewaiResult.pipeline_id || null) : null,
+        markdown_report: typeof crewaiResult === 'object' ? (crewaiResult.markdown || crewaiResult.markdown_report || crewaiResult.report_markdown || null) : null,
+        pdf_report_url: typeof crewaiResult === 'object' ? (crewaiResult.pdf_url || crewaiResult.pdf_report_url || crewaiResult.report_url || null) : null,
+      });
+    }
+
+    return res.status(502).json({
+      success: false,
+      source: 'crewai_unreachable',
+      error: crewaiError || 'Unable to reach any CrewAI pipeline endpoint',
+      try_paths: tryPaths.map((t) => t.path),
+      fallback: true,
+    });
+  } catch (err: any) {
+    res.status(500).json({
+      success: false,
+      error: err?.message || 'CrewAI pipeline invocation failed',
+      fallback: true,
+    });
+  }
+});
+
+app.post('/api/crewai/generate-report', async (req, res) => {
+  try {
+    if (!crewAIConfigured) {
+      return res.status(503).json({
+        success: false,
+        error: 'CrewAI not configured',
+        fallback: true,
+      });
+    }
+    const report = req.body || {};
+    const payload = {
+      report,
+      format: req.query.format || 'both',
+      options: {
+        include_cover_page: true,
+        include_toc: true,
+        include_timeline: true,
+        include_evidence: true,
+        include_remediation: true,
+        brand_name: 'ThreatWeave Security Operations',
+        reference: 'SIH 2026 — Formal Forensic Dossier',
+      },
+    };
+
+    const tryPaths = [
+      { path: '/api/v1/reports/generate', method: 'POST' },
+      { path: '/reports/generate', method: 'POST' },
+      { path: '/api/v1/pipelines/report-generation/execute', method: 'POST' },
+      { path: '/generate-report', method: 'POST' },
+    ];
+
+    let crewaiResult: any = null;
+    let lastErr: string | null = null;
+
+    for (const endpoint of tryPaths) {
+      try {
+        const response = await crewaiFetch(endpoint.path, {
+          method: endpoint.method,
+          body: JSON.stringify(payload),
+        }, 180000);
+        if (response.ok) {
+          crewaiResult = await response.json().catch(async () => ({ raw: await response.text() }));
+          break;
+        } else {
+          lastErr = `${endpoint.path} -> ${response.status} ${response.statusText}`;
+        }
+      } catch (e: any) {
+        lastErr = e?.message || lastErr;
+      }
+    }
+
+    if (crewaiResult) {
+      return res.json({
+        success: true,
+        source: 'crewai',
+        result: crewaiResult,
+        markdown: typeof crewaiResult === 'object' ? (crewaiResult.markdown || crewaiResult.report || crewaiResult.content || null) : null,
+        pdf_url: typeof crewaiResult === 'object' ? (crewaiResult.pdf_url || crewaiResult.url || crewaiResult.download_url || null) : null,
+      });
+    }
+
+    return res.status(502).json({
+      success: false,
+      error: lastErr || 'CrewAI report generation failed',
+      fallback: true,
+    });
+  } catch (err: any) {
+    res.status(500).json({
+      success: false,
+      error: err?.message || 'Report generation failed',
+      fallback: true,
+    });
+  }
 });
 
 app.get('/api/reports', async (req, res) => {
@@ -549,4 +786,5 @@ app.listen(PORT, () => {
   console.log(`ThreatWeave API Server running on port ${PORT}`);
   console.log(`Environment: ${process.env.NODE_ENV || 'development'}`);
   console.log(`MongoDB URI: ${mongoUri ? 'Configured' : 'Not Set'}`);
+  console.log(`CrewAI: ${crewAIConfigured ? 'Configured' : 'Not Set'} ${crewAIConfigured ? ('(' + CREWAI_BASE_URL + ')') : ''}`);
 });

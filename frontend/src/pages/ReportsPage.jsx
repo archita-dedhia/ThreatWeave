@@ -17,6 +17,7 @@ import {
   FileCode,
   Loader2,
   AlertCircle,
+  Sparkles,
 } from 'lucide-react';
 import { RiskBadge } from '../components/common/RiskBadge';
 import { StatusBadge } from '../components/common/StatusBadge';
@@ -33,6 +34,8 @@ export const ReportsPage = () => {
     generateReportForIncident,
     addToast,
     loadDemoDataset,
+    crewAIStatus,
+    generateCrewAIReport,
   } = useSOC();
 
   const [copied, setCopied] = useState(false);
@@ -154,6 +157,27 @@ ${(r.ai_investigation_explanation && r.ai_investigation_explanation.risk_rationa
     if (!activeReport) return;
     setExporting('md');
     try {
+      // Try CrewAI first if configured and connected
+      if (crewAIStatus.configured) {
+        const crew = await generateCrewAIReport(activeReport);
+        if (crew.used && crew.data && crew.data.success) {
+          if (crew.data.markdown) {
+            const blob = new Blob([crew.data.markdown], { type: 'text/markdown' });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = `CrewAI_ThreatWeave_${activeReport.id}.md`;
+            a.click();
+            URL.revokeObjectURL(url);
+            addToast('success', 'CrewAI MD Report Downloaded', 'Markdown dossier generated via CrewAI pipeline');
+            setExporting(null);
+            return;
+          }
+          if (crew.data.pdf_url || crew.data.result?.download_url) {
+            addToast('info', 'CrewAI Report Available', 'CrewAI returned artifact URL; falling back to direct MD export');
+          }
+        }
+      }
       const response = await fetch(`${API_BASE}/api/generate-markdown`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -200,6 +224,37 @@ ${(r.ai_investigation_explanation && r.ai_investigation_explanation.risk_rationa
     if (!activeReport) return;
     setExporting('pdf');
     try {
+      // Try CrewAI first if configured
+      if (crewAIStatus.configured) {
+        const crew = await generateCrewAIReport(activeReport);
+        if (crew.used && crew.data && crew.data.success) {
+          const pdfUrl = crew.data.pdf_url || crew.data.result?.pdf_url || crew.data.result?.download_url;
+          if (pdfUrl) {
+            try {
+              const fetchRes = await fetch(pdfUrl);
+              if (fetchRes.ok) {
+                const blob = await fetchRes.blob();
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = `CrewAI_ThreatWeave_${activeReport.id}.pdf`;
+                a.click();
+                URL.revokeObjectURL(url);
+                addToast('success', 'CrewAI PDF Downloaded', 'PDF dossier generated via CrewAI pipeline');
+                setExporting(null);
+                return;
+              }
+            } catch {
+              // fall through
+            }
+            // If can't download directly, open in new tab
+            window.open(pdfUrl, '_blank', 'noopener,noreferrer');
+            addToast('success', 'CrewAI PDF Opened', 'CrewAI PDF artifact opened in new tab');
+            setExporting(null);
+            return;
+          }
+        }
+      }
       const response = await fetch(`${API_BASE}/api/generate-pdf`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -431,6 +486,43 @@ ${(r.ai_investigation_explanation && r.ai_investigation_explanation.risk_rationa
                 <AlertCircle className="w-3 h-3" />
               )}
               <span>{dbStatus.loading ? 'DB Connecting' : dbStatus.connected ? 'MongoDB Online' : 'DB Offline'}</span>
+            </span>
+            <span
+              className={`text-[10px] font-mono px-2 py-0.5 rounded border flex items-center gap-1 ${
+                !crewAIStatus.checked
+                  ? 'bg-yellow-500/10 text-yellow-400 border-yellow-500/20'
+                  : crewAIStatus.configured && crewAIStatus.connected
+                  ? 'bg-purple-500/10 text-purple-400 border-purple-500/20'
+                  : crewAIStatus.configured
+                  ? 'bg-orange-500/10 text-orange-400 border-orange-500/20'
+                  : 'bg-gray-500/10 text-gray-400 border-gray-500/20'
+              }`}
+              title={
+                !crewAIStatus.checked
+                  ? 'Checking CrewAI endpoint...'
+                  : crewAIStatus.configured && crewAIStatus.connected
+                  ? 'CrewAI Pipeline configured and reachable'
+                  : crewAIStatus.configured
+                  ? 'CrewAI configured but endpoint unreachable (fallback to local engine)'
+                  : 'CrewAI not configured in backend .env'
+              }
+            >
+              {!crewAIStatus.checked ? (
+                <Loader2 className="w-3 h-3 animate-spin" />
+              ) : crewAIStatus.configured && crewAIStatus.connected ? (
+                <Sparkles className="w-3 h-3" />
+              ) : (
+                <AlertCircle className="w-3 h-3" />
+              )}
+              <span>
+                {!crewAIStatus.checked
+                  ? 'CrewAI Probing'
+                  : crewAIStatus.configured && crewAIStatus.connected
+                  ? 'CrewAI Online'
+                  : crewAIStatus.configured
+                  ? 'CrewAI Endpoint Unreachable'
+                  : 'CrewAI Not Configured'}
+              </span>
             </span>
           </div>
           <h2 className="text-base font-bold text-white mt-1">Forensic Incident Reports Generator</h2>

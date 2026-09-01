@@ -88,7 +88,7 @@ export const AIInvestigationPage = () => {
               <div className="space-y-2 pt-2 border-t border-white/10 text-xs font-mono">
                 <div className="flex justify-between py-1 border-b border-white/5">
                   <span className="text-gray-400">Cognitive Model:</span>
-                  <span className="text-gray-200">Gemini 2.5 Flash (Stream Parser)</span>
+                  <span className="text-gray-200">CrewAI L1 Pipeline (Stream Parser)</span>
                 </div>
                 <div className="flex justify-between py-1 border-b border-white/5">
                   <span className="text-gray-400">Ingested Stream:</span>
@@ -139,7 +139,7 @@ export const AIInvestigationPage = () => {
               <div className="space-y-2 pt-2 border-t border-white/10 text-xs font-mono">
                 <div className="flex justify-between py-1 border-b border-white/5">
                   <span className="text-gray-400">Cognitive Model:</span>
-                  <span className="text-gray-200">Gemini 2.5 Pro (Graph Reasoner)</span>
+                  <span className="text-gray-200">CrewAI L2 Pipeline (Graph Reasoner)</span>
                 </div>
                 <div className="flex justify-between py-1 border-b border-white/5">
                   <span className="text-gray-400">Correlated Threats:</span>

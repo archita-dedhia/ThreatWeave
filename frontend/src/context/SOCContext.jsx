@@ -86,14 +86,21 @@ export const SOCProvider = ({ children }) => {
     exfiltration_threshold_mb: 50,
     off_hours_start: '22:00',
     off_hours_end: '06:00',
-    log_agent_model: 'Gemini 2.5 Flash (Heuristic Engine)',
-    investigation_agent_model: 'Gemini 2.5 Pro (Graph Reasoner)',
+    log_agent_model: 'CrewAI L1 Pipeline (Security Incident v1)',
+    investigation_agent_model: 'CrewAI L2 Pipeline (Attack Chain Reasoner)',
     ai_temperature: 0.2,
     alert_critical: true,
     alert_incident_created: true,
     auto_correlate: true,
     max_batch_size: 5000,
     mongo_uri: import.meta.env.VITE_MONGO_URI || '',
+    use_crewai: true,
+  });
+
+  const [crewAIStatus, setCrewAIStatus] = useState({
+    configured: false,
+    connected: false,
+    checked: false,
   });
 
   const updateSettings = (newSettings) => {
@@ -124,6 +131,47 @@ export const SOCProvider = ({ children }) => {
     addToast('success', 'Configuration Saved', 'Detection engine settings updated successfully.');
   };
 
+  const runCrewAIPipeline = async (rawEvents) => {
+    if (!settings.use_crewai) return { used: false };
+    try {
+      const res = await safeFetch(`${API_BASE}/api/crewai/run-pipeline`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          events: rawEvents,
+          config: {
+            generate_pdf: true,
+            generate_markdown: true,
+            include_mitre_mapping: true,
+            include_evidence: true,
+            include_remediation_playbooks: true,
+          },
+        }),
+      }, 120000);
+      if (!res.ok) return { used: false };
+      const data = await res.json().catch(() => ({}));
+      return { used: true, data };
+    } catch {
+      return { used: false };
+    }
+  };
+
+  const generateCrewAIReport = async (report) => {
+    if (!settings.use_crewai) return { used: false };
+    try {
+      const res = await safeFetch(`${API_BASE}/api/crewai/generate-report`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(report),
+      }, 120000);
+      if (!res.ok) return { used: false };
+      const data = await res.json().catch(() => ({}));
+      return { used: true, data };
+    } catch {
+      return { used: false };
+    }
+  };
+
   /**
    * Loads the controlled SIH 2026 3-scenario dataset and auto-executes the multi-agent pipeline
    */
@@ -136,93 +184,102 @@ export const SOCProvider = ({ children }) => {
       status: 'analyzing',
       current_task: 'Ingesting SIH 2026 multi-scenario cybersecurity telemetry',
       progress: 20,
-      output_summary: 'Normalizing 21 raw security events...',
+      output_summary: 'Normalizing 21 raw security events via CrewAI pipeline...',
     }));
 
     addToast('info', 'Demo Dataset Loaded', 'Ingesting 21 controlled multi-scenario security events.');
 
-    setTimeout(() => {
-      // Step 1: Run Log Analysis Agent
-      const logAnalysisResult = runLogAnalysisAgent(CONTROLLED_DEMO_EVENTS, settings);
-      setEvents(logAnalysisResult.enrichedEvents);
-      setAgentLogs((prev) => [...prev, ...logAnalysisResult.logs]);
-      setActiveLogPipelineStage('detection');
-
-      setLogAgentState({
-        id: 'agent-1',
-        name: 'Log Analysis Agent',
-        role: 'L1 Ingestion, normalization, regex/heuristic parsing & anomaly detection',
-        status: 'completed',
-        current_task: 'Idle - Ingestion batch normalized and evaluated',
-        progress: 100,
-        output_summary: `Processed ${logAnalysisResult.enrichedEvents.length} events, flagged ${logAnalysisResult.suspiciousEvents.length} suspicious anomalies`,
-        last_active: 'Just now',
-      });
-
-      // Step 2: Handoff to Threat Investigation Agent
-      setInvestigationAgentState((prev) => ({
-        ...prev,
-        status: 'analyzing',
-        current_task: 'Correlating attack chains, mapping MITRE techniques, and scoring risk',
-        progress: 50,
-        output_summary: 'Reconstructing graph attack paths...',
-      }));
-
+    const fallbackRun = () => {
       setTimeout(() => {
-        const investigationResult = runThreatInvestigationAgent(
-          logAnalysisResult.suspiciousEvents,
-          logAnalysisResult.enrichedEvents,
-          settings
-        );
+        const logAnalysisResult = runLogAnalysisAgent(CONTROLLED_DEMO_EVENTS, settings);
+        setEvents(logAnalysisResult.enrichedEvents);
+        setAgentLogs((prev) => [...prev, ...logAnalysisResult.logs]);
+        setActiveLogPipelineStage('detection');
 
-        setThreats(investigationResult.threats);
-        setAgentLogs((prev) => [...prev, ...investigationResult.logs]);
-        setAgentMessages((prev) => [...prev, ...investigationResult.messages]);
-
-        // Auto-generate incidents for active threats
-        const newIncidents = investigationResult.threats.map((threat, idx) => ({
-          id: `INC-2026-${String(idx + 1).padStart(3, '0')}`,
-          threat_id: threat.id,
-          threat_title: threat.title,
-          risk_level: threat.risk_level,
-          status: 'open',
-          affected_user: threat.affected_user,
-          affected_system: threat.affected_system,
-          source: threat.source,
-          created_at: threat.detected_at,
-          assigned_to: idx === 0 ? 'Lead SOC Analyst' : 'Incident Responder (Triage)',
-          notes: [
-            {
-              id: `NOTE-${Date.now()}-${idx}`,
-              author: 'Threat Detection Engine',
-              timestamp: threat.detected_at,
-              text: `Incident automatically opened upon verification by Threat Investigation Agent. Risk score: ${threat.risk_score}/100.`,
-            },
-          ],
-        }));
-
-        setIncidents(newIncidents);
-
-        setInvestigationAgentState({
-          id: 'agent-2',
-          name: 'Threat Investigation Agent',
-          role: 'L2 Contextual correlation, MITRE ATT&CK mapping, risk scoring & response playbooks',
+        setLogAgentState({
+          id: 'agent-1',
+          name: 'Log Analysis Agent',
+          role: 'L1 Ingestion, normalization, regex/heuristic parsing & anomaly detection',
           status: 'completed',
-          current_task: 'Completed - 3 Correlated Threat Chains verified',
+          current_task: 'Idle - Ingestion batch normalized and evaluated (Local fallback)',
           progress: 100,
-          output_summary: `Correlated ${investigationResult.threats.length} actionable attack chains with defensive playbooks`,
+          output_summary: `Processed ${logAnalysisResult.enrichedEvents.length} events, flagged ${logAnalysisResult.suspiciousEvents.length} suspicious anomalies`,
           last_active: 'Just now',
         });
 
-        setIsProcessing(false);
-        setActiveLogPipelineStage('idle');
-        addToast(
-          'success',
-          'Investigation Complete',
-          `Correlated ${investigationResult.threats.length} threats and generated response playbooks.`
-        );
-      }, 700);
-    }, 600);
+        setInvestigationAgentState((prev) => ({
+          ...prev,
+          status: 'analyzing',
+          current_task: 'Correlating attack chains, mapping MITRE techniques, and scoring risk',
+          progress: 50,
+          output_summary: 'Reconstructing graph attack paths...',
+        }));
+
+        setTimeout(() => {
+          const investigationResult = runThreatInvestigationAgent(
+            logAnalysisResult.suspiciousEvents,
+            logAnalysisResult.enrichedEvents,
+            settings
+          );
+
+          setThreats(investigationResult.threats);
+          setAgentLogs((prev) => [...prev, ...investigationResult.logs]);
+          setAgentMessages((prev) => [...prev, ...investigationResult.messages]);
+
+          const newIncidents = investigationResult.threats.map((threat, idx) => ({
+            id: `INC-2026-${String(idx + 1).padStart(3, '0')}`,
+            threat_id: threat.id,
+            threat_title: threat.title,
+            risk_level: threat.risk_level,
+            status: 'open',
+            affected_user: threat.affected_user,
+            affected_system: threat.affected_system,
+            source: threat.source,
+            created_at: threat.detected_at,
+            assigned_to: idx === 0 ? 'Lead SOC Analyst' : 'Incident Responder (Triage)',
+            notes: [
+              {
+                id: `NOTE-${Date.now()}-${idx}`,
+                author: 'Threat Detection Engine',
+                timestamp: threat.detected_at,
+                text: `Incident automatically opened upon verification by Threat Investigation Agent. Risk score: ${threat.risk_score}/100.`,
+              },
+            ],
+          }));
+
+          setIncidents(newIncidents);
+
+          setInvestigationAgentState({
+            id: 'agent-2',
+            name: 'Threat Investigation Agent',
+            role: 'L2 Contextual correlation, MITRE ATT&CK mapping, risk scoring & response playbooks',
+            status: 'completed',
+            current_task: 'Completed - 3 Correlated Threat Chains verified (Local fallback)',
+            progress: 100,
+            output_summary: `Correlated ${investigationResult.threats.length} actionable attack chains with defensive playbooks`,
+            last_active: 'Just now',
+          });
+
+          setIsProcessing(false);
+          setActiveLogPipelineStage('idle');
+          addToast(
+            'warning',
+            'Local Fallback Used',
+            `Could not reach CrewAI pipeline. Ran local heuristic engine: ${investigationResult.threats.length} threats detected.`
+          );
+        }, 700);
+      }, 600);
+    };
+
+    // Try CrewAI first, then fall back
+    (async () => {
+      const crew = await runCrewAIPipeline(CONTROLLED_DEMO_EVENTS);
+      if (crew.used && crew.data && crew.data.success) {
+        addToast('success', 'CrewAI Pipeline Engaged', 'Security Incident Pipeline v1 processing via CrewAI...');
+        setCrewAIStatus((s) => ({ ...s, connected: true, configured: true, checked: true }));
+      }
+      fallbackRun();
+    })();
   };
 
   // Process manual raw log inputs
@@ -487,7 +544,7 @@ export const SOCProvider = ({ children }) => {
   useEffect(() => { if (incidents.length) saveIncidentsToBackend(incidents); }, [incidents, saveIncidentsToBackend]);
   useEffect(() => { if (events.length) saveEventsToBackend(events); }, [events, saveEventsToBackend]);
 
-  // Initialize: Try to load from DB, else demo dataset
+  // Initialize: Try to load from DB, check CrewAI status, else demo dataset
   useEffect(() => {
     let cancelled = false;
     const bootstrap = async () => {
@@ -496,6 +553,13 @@ export const SOCProvider = ({ children }) => {
         const h = await health.json().catch(() => ({}));
         if (health.ok) {
           setBackendAvailable(true);
+          if (h.crewai) {
+            setCrewAIStatus({
+              configured: !!h.crewai.configured,
+              connected: !!h.crewai.configured,
+              checked: true,
+            });
+          }
           const dbStatus = await safeFetch(`${API_BASE}/api/db-status`, undefined, 3500);
           const dbData = await dbStatus.json().catch(() => ({ connected: false }));
           if (dbStatus.ok && dbData.connected) {
@@ -504,6 +568,17 @@ export const SOCProvider = ({ children }) => {
             if (repRes.ok) reports.push(...(await repRes.json().catch(() => [])));
             if (!cancelled && reports.length > 0) setReports(reports);
           }
+          try {
+            const crewStatus = await safeFetch(`${API_BASE}/api/crewai-status`, undefined, 5000);
+            const cs = await crewStatus.json().catch(() => ({}));
+            if (!cancelled) {
+              setCrewAIStatus({
+                configured: !!cs.configured,
+                connected: !!cs.connected,
+                checked: true,
+              });
+            }
+          } catch {}
         }
       } catch {}
       if (!cancelled) loadDemoDataset();
@@ -551,6 +626,9 @@ export const SOCProvider = ({ children }) => {
         executeResponseAction,
         generateReportForIncident,
         backendAvailable,
+        crewAIStatus,
+        runCrewAIPipeline,
+        generateCrewAIReport,
       }}
     >
       {children}

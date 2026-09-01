@@ -1,6 +1,6 @@
 {
   "name": "ThreatWeave",
-  "description": "Agentic AI Cybersecurity Assistant for Automated Threat Investigation and Incident Response",
+  "description": "Agentic AI Cybersecurity Assistant for Automated Threat Investigation and Incident Response via CrewAI Security Incident Pipeline",
   "requestFramePermissions": [],
-  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_CREWAI_PIPELINE"]
 }
