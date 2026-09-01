@@ -90,12 +90,12 @@ export const Sidebar = () => {
         </div>
         <div className="min-w-0">
           <div className="flex items-center gap-1.5">
-            <span className="font-black text-sm tracking-wider text-white font-mono uppercase">UrbanSOC</span>
+            <span className="font-black text-sm tracking-wider text-white font-mono uppercase">ThreatWeave</span>
             <span className="text-[9px] px-1 py-0.2 bg-blue-600/10 text-blue-400 border border-blue-500/20 font-bold rounded">
               SIH-26
             </span>
           </div>
-          <p className="text-[10px] text-gray-500 font-mono truncate">Agentic AI Cyber Assistant</p>
+          <p className="text-[10px] text-gray-500 font-mono truncate">Security Operations Dashboard</p>
         </div>
       </div>
 
@@ -150,7 +150,7 @@ export const Sidebar = () => {
           <span>SIH 2026 Problem PS-01</span>
         </div>
         <p className="text-[10px] text-gray-400 mt-1 leading-tight font-mono">
-          Agentic AI for Automated Threat Investigation &amp; Incident Response
+          Threat Detection &amp; Incident Response Platform
         </p>
       </div>
     </aside>

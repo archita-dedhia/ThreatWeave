@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useState, useEffect } from 'react';
+import React, { createContext, useContext, useState, useEffect, useCallback } from 'react';
 import { CONTROLLED_DEMO_EVENTS } from '../data/demoDataset';
 import {
   parseRawLogs,
@@ -8,6 +8,20 @@ import {
 } from '../services/detectionEngine';
 
 const SOCContext = createContext(undefined);
+
+const API_BASE = import.meta.env.VITE_API_URL || 'http://localhost:5000';
+
+const safeFetch = async (url, opts, timeoutMs = 6000) => {
+  try {
+    const ctrl = new AbortController();
+    const t = setTimeout(() => ctrl.abort(), timeoutMs);
+    const res = await fetch(url, { ...opts, signal: ctrl.signal });
+    clearTimeout(t);
+    return res;
+  } catch {
+    return { ok: false, status: 0, json: async () => ({}) };
+  }
+};
 
 export const SOCProvider = ({ children }) => {
   // Navigation
@@ -21,6 +35,7 @@ export const SOCProvider = ({ children }) => {
   const [threats, setThreats] = useState([]);
   const [incidents, setIncidents] = useState([]);
   const [reports, setReports] = useState([]);
+  const [backendAvailable, setBackendAvailable] = useState(false);
 
   // Multi-Agent Execution States
   const [logAgentState, setLogAgentState] = useState({
@@ -78,10 +93,35 @@ export const SOCProvider = ({ children }) => {
     alert_incident_created: true,
     auto_correlate: true,
     max_batch_size: 5000,
+    mongo_uri: import.meta.env.VITE_MONGO_URI || '',
   });
 
   const updateSettings = (newSettings) => {
     setSettings((prev) => ({ ...prev, ...newSettings }));
+  };
+
+  const socSettings = {
+    bruteForceThreshold: settings.brute_force_threshold,
+    riskThresholdHigh: 70,
+    riskThresholdCritical: 85,
+    enableAutoContainment: settings.auto_correlate,
+    aiModelMode: settings.log_agent_model,
+    apiKey: '',
+    syslogPort: 514,
+    mongoUri: settings.mongo_uri,
+  };
+
+  const updateSOCSettings = (local) => {
+    updateSettings({
+      brute_force_threshold: local.bruteForceThreshold ?? settings.brute_force_threshold,
+      auto_correlate:
+        typeof local.enableAutoContainment === 'boolean'
+          ? local.enableAutoContainment
+          : settings.auto_correlate,
+      log_agent_model: local.aiModelMode ?? settings.log_agent_model,
+      mongo_uri: local.mongoUri ?? settings.mongo_uri,
+    });
+    addToast('success', 'Configuration Saved', 'Detection engine settings updated successfully.');
   };
 
   /**
@@ -154,7 +194,7 @@ export const SOCProvider = ({ children }) => {
           notes: [
             {
               id: `NOTE-${Date.now()}-${idx}`,
-              author: 'Autonomous SOC Engine',
+              author: 'Threat Detection Engine',
               timestamp: threat.detected_at,
               text: `Incident automatically opened upon verification by Threat Investigation Agent. Risk score: ${threat.risk_score}/100.`,
             },
@@ -368,6 +408,52 @@ export const SOCProvider = ({ children }) => {
     addToast('success', 'Playbook Action Executed', `Executed action ${actionId} on target endpoint.`);
   };
 
+  const saveReportsToBackend = useCallback(async (reportsList) => {
+    if (!backendAvailable || !reportsList || reportsList.length === 0) return;
+    for (const r of reportsList.slice(0, 10)) {
+      try {
+        await safeFetch(`${API_BASE}/api/reports`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(r),
+        });
+      } catch {}
+    }
+  }, [backendAvailable]);
+
+  const saveThreatsToBackend = useCallback(async (threatsList) => {
+    if (!backendAvailable || threatsList?.length === 0) return;
+    try {
+      await safeFetch(`${API_BASE}/api/threats/batch`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(threatsList),
+      });
+    } catch {}
+  }, [backendAvailable]);
+
+  const saveIncidentsToBackend = useCallback(async (incidentsList) => {
+    if (!backendAvailable || incidentsList?.length === 0) return;
+    try {
+      await safeFetch(`${API_BASE}/api/incidents/batch`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(incidentsList),
+      });
+    } catch {}
+  }, [backendAvailable]);
+
+  const saveEventsToBackend = useCallback(async (eventsList) => {
+    if (!backendAvailable || eventsList?.length === 0) return;
+    try {
+      await safeFetch(`${API_BASE}/api/events/batch`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(eventsList),
+      });
+    } catch {}
+  }, [backendAvailable]);
+
   const generateReportForIncident = (incidentId) => {
     const incident = incidents.find((i) => i.id === incidentId);
     if (!incident) return null;
@@ -377,15 +463,53 @@ export const SOCProvider = ({ children }) => {
     const report = generateReportFromThreat(incident, threat, events);
     setReports((prev) => {
       const filtered = prev.filter((r) => r.incident_id !== incidentId);
-      return [report, ...filtered];
+      const next = [report, ...filtered];
+      setTimeout(() => saveReportsToBackend(next), 200);
+      return next;
     });
     addToast('success', 'Report Generated', `Compiled forensic incident report ${report.id}`);
+    if (backendAvailable) {
+      setTimeout(async () => {
+        try {
+          await safeFetch(`${API_BASE}/api/reports`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(report),
+          });
+        } catch {}
+      }, 100);
+    }
     return report;
   };
 
-  // Initialize demo dataset on first load
+  // Sync data to backend whenever the lists change
+  useEffect(() => { if (threats.length) saveThreatsToBackend(threats); }, [threats, saveThreatsToBackend]);
+  useEffect(() => { if (incidents.length) saveIncidentsToBackend(incidents); }, [incidents, saveIncidentsToBackend]);
+  useEffect(() => { if (events.length) saveEventsToBackend(events); }, [events, saveEventsToBackend]);
+
+  // Initialize: Try to load from DB, else demo dataset
   useEffect(() => {
-    loadDemoDataset();
+    let cancelled = false;
+    const bootstrap = async () => {
+      try {
+        const health = await safeFetch(`${API_BASE}/api/health`, undefined, 3500);
+        const h = await health.json().catch(() => ({}));
+        if (health.ok) {
+          setBackendAvailable(true);
+          const dbStatus = await safeFetch(`${API_BASE}/api/db-status`, undefined, 3500);
+          const dbData = await dbStatus.json().catch(() => ({ connected: false }));
+          if (dbStatus.ok && dbData.connected) {
+            const reports = [];
+            const repRes = await safeFetch(`${API_BASE}/api/reports`);
+            if (repRes.ok) reports.push(...(await repRes.json().catch(() => [])));
+            if (!cancelled && reports.length > 0) setReports(reports);
+          }
+        }
+      } catch {}
+      if (!cancelled) loadDemoDataset();
+    };
+    bootstrap();
+    return () => { cancelled = true; };
   }, []);
 
   return (
@@ -411,6 +535,8 @@ export const SOCProvider = ({ children }) => {
         activeLogPipelineStage,
         settings,
         updateSettings,
+        socSettings,
+        updateSOCSettings,
         toasts,
         addToast,
         removeToast,
@@ -424,6 +550,7 @@ export const SOCProvider = ({ children }) => {
         addIncidentNote,
         executeResponseAction,
         generateReportForIncident,
+        backendAvailable,
       }}
     >
       {children}

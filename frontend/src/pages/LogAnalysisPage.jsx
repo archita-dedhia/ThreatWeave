@@ -80,6 +80,7 @@ export const LogAnalysisPage = () => {
   const handleAnalyze = () => {
     if (!rawInput.trim()) return;
     processRawLogs(rawInput, selectedFormat);
+    setRawInput('');
   };
 
   const handleExportCSV = () => {
@@ -264,43 +265,16 @@ export const LogAnalysisPage = () => {
           </div>
         </div>
 
-        {/* Right: Normalization Pipeline Specs & Heuristic Stats */}
+        {/* Right: Demo Dataset Loader */}
         <div className="lg:col-span-4 p-5 bg-[#1A1C23] border border-white/10 rounded-lg flex flex-col justify-between space-y-4">
-          <div>
-            <div className="pb-3 border-b border-white/10">
-              <h4 className="text-xs font-bold text-white uppercase tracking-wider font-mono">
-                Log Preprocessing Schema
-              </h4>
-              <p className="text-[11px] text-gray-400 mt-0.5">
-                Converts unstructured logs into normalized security schema:
-              </p>
-            </div>
-
-            <div className="space-y-2 py-3 text-xs font-mono">
-              {[
-                { field: 'timestamp', desc: 'ISO 8601 UTC temporal index' },
-                { field: 'source_ip / destination_ip', desc: 'IPv4/IPv6 socket pair mapping' },
-                { field: 'user / identity', desc: 'Human, service or system caller' },
-                { field: 'event_type & action', desc: 'Normalized taxonomy categorization' },
-                { field: 'process & command', desc: 'Process execution tree & args' },
-                { field: 'severity & flags', desc: 'Heuristic anomaly score rating' },
-              ].map((item) => (
-                <div key={item.field} className="p-2 bg-[#111217] rounded border border-white/10">
-                  <div className="text-blue-400 font-semibold text-[11px]">{item.field}</div>
-                  <div className="text-gray-400 text-[10px]">{item.desc}</div>
-                </div>
-              ))}
-            </div>
-          </div>
-
-          <div className="p-3 bg-[#111217] rounded-lg border border-white/10 text-[11px] font-mono text-gray-400">
-            <span className="text-white font-semibold block mb-1">Standard Demo Data</span>
+          <div className="p-4 bg-[#111217] rounded-lg border border-white/10 text-[11px] font-mono text-gray-400 space-y-2">
+            <span className="text-white font-semibold block">Standard Demo Data</span>
             <p className="leading-relaxed">
               Click below to restore the controlled multi-scenario dataset for test evaluations.
             </p>
             <button
               onClick={loadDemoDataset}
-              className="mt-2 text-xs text-blue-400 hover:text-blue-300 font-semibold flex items-center gap-1 cursor-pointer"
+              className="mt-1 text-xs text-blue-400 hover:text-blue-300 font-semibold flex items-center gap-1 cursor-pointer"
             >
               <span>Load 21 Controlled Events</span>
               <span>→</span>

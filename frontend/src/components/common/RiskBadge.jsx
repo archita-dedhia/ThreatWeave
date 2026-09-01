@@ -10,27 +10,27 @@ export const RiskBadge = ({
 
   const config = {
     CRITICAL: {
-      bg: 'bg-red-500/10',
+      bg: 'bg-red-500/15',
       text: 'text-red-400',
-      border: 'border-red-500/20',
+      border: 'border-red-500/40',
       icon: ShieldAlert,
     },
     HIGH: {
-      bg: 'bg-yellow-500/10',
-      text: 'text-yellow-400',
-      border: 'border-yellow-500/20',
+      bg: 'bg-orange-500/15',
+      text: 'text-orange-400',
+      border: 'border-orange-500/40',
       icon: AlertTriangle,
     },
     MEDIUM: {
-      bg: 'bg-blue-500/10',
-      text: 'text-blue-400',
-      border: 'border-blue-500/20',
+      bg: 'bg-yellow-500/15',
+      text: 'text-yellow-400',
+      border: 'border-yellow-500/40',
       icon: AlertCircle,
     },
     LOW: {
-      bg: 'bg-green-500/10',
+      bg: 'bg-green-500/15',
       text: 'text-green-400',
-      border: 'border-green-500/20',
+      border: 'border-green-500/40',
       icon: Info,
     },
     INFO: {

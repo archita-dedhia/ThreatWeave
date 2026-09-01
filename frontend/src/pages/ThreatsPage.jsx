@@ -13,10 +13,47 @@ import { EmptyState } from '../components/common/EmptyState';
 export const ThreatsPage = () => {
   const {
     threats,
+    incidents,
     navigateToThreat,
     createIncidentFromThreat,
     loadDemoDataset,
   } = useSOC();
+
+  const getSeverityStyles = (riskLevel) => {
+    const norm = (riskLevel || 'LOW').toUpperCase();
+    switch (norm) {
+      case 'CRITICAL':
+        return {
+          card: 'border-red-500/40 hover:border-red-400/60 bg-gradient-to-br from-red-500/5 via-[#1A1C23] to-transparent',
+          headerGlow: 'shadow-[0_0_20px_rgba(239,68,68,0.1)]',
+          numberBadge: 'bg-red-500',
+        };
+      case 'HIGH':
+        return {
+          card: 'border-orange-500/40 hover:border-orange-400/60 bg-gradient-to-br from-orange-500/5 via-[#1A1C23] to-transparent',
+          headerGlow: 'shadow-[0_0_20px_rgba(249,115,22,0.1)]',
+          numberBadge: 'bg-orange-500',
+        };
+      case 'MEDIUM':
+        return {
+          card: 'border-yellow-500/40 hover:border-yellow-400/60 bg-gradient-to-br from-yellow-500/5 via-[#1A1C23] to-transparent',
+          headerGlow: 'shadow-[0_0_20px_rgba(234,179,8,0.1)]',
+          numberBadge: 'bg-yellow-500',
+        };
+      case 'LOW':
+        return {
+          card: 'border-green-500/40 hover:border-green-400/60 bg-gradient-to-br from-green-500/5 via-[#1A1C23] to-transparent',
+          headerGlow: 'shadow-[0_0_20px_rgba(34,197,94,0.1)]',
+          numberBadge: 'bg-green-500',
+        };
+      default:
+        return {
+          card: 'border-white/10 hover:border-blue-500/40',
+          headerGlow: '',
+          numberBadge: 'bg-gray-500',
+        };
+    }
+  };
 
   const [search, setSearch] = useState('');
   const [riskFilter, setRiskFilter] = useState('ALL');
@@ -117,10 +154,13 @@ export const ThreatsPage = () => {
         </div>
       ) : (
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-          {filteredThreats.map((threat) => (
+          {filteredThreats.map((threat) => {
+            const severity = getSeverityStyles(threat.risk_level);
+            const hasIncident = incidents.some((i) => i.threat_id === threat.id);
+            return (
             <div
               key={threat.id}
-              className="p-5 bg-[#1A1C23] border border-white/10 hover:border-blue-500/40 rounded-lg flex flex-col justify-between space-y-4 shadow-sm transition-all group"
+              className={`p-5 border rounded-lg flex flex-col justify-between space-y-4 shadow-sm transition-all group ${severity.card} ${severity.headerGlow}`}
             >
               <div>
                 {/* Header meta */}
@@ -128,14 +168,24 @@ export const ThreatsPage = () => {
                   <span className="text-gray-400">{threat.id}</span>
                   <div className="flex items-center gap-2">
                     <RiskBadge level={threat.risk_level} size="sm" />
-                    <span className="text-blue-400 font-bold bg-blue-600/10 px-1.5 py-0.5 rounded border border-blue-500/20 text-[10px]">
+                    <span className={`font-bold px-1.5 py-0.5 rounded border text-[10px] ${
+                      threat.risk_level === 'CRITICAL' ? 'bg-red-600/10 text-red-400 border-red-500/20' :
+                      threat.risk_level === 'HIGH' ? 'bg-orange-600/10 text-orange-400 border-orange-500/20' :
+                      threat.risk_level === 'MEDIUM' ? 'bg-yellow-600/10 text-yellow-400 border-yellow-500/20' :
+                      'bg-green-600/10 text-green-400 border-green-500/20'
+                    }`}>
                       {threat.risk_score}/100 Risk
                     </span>
                   </div>
                 </div>
 
                 {/* Threat Title & Classification */}
-                <h3 className="text-sm font-bold text-white mt-3 group-hover:text-blue-300 transition-colors">
+                <h3 className={`text-sm font-bold mt-3 group-hover:text-blue-300 transition-colors ${
+                  threat.risk_level === 'CRITICAL' ? 'text-red-50' :
+                  threat.risk_level === 'HIGH' ? 'text-orange-50' :
+                  threat.risk_level === 'MEDIUM' ? 'text-yellow-50' :
+                  'text-white'
+                }`}>
                   {threat.title}
                 </h3>
                 <span className="inline-block mt-1 text-[11px] font-mono text-gray-400 bg-[#111217] px-2 py-0.5 rounded border border-white/5">
@@ -182,7 +232,7 @@ export const ThreatsPage = () => {
                 </div>
 
                 {/* Action Buttons */}
-                <div className="grid grid-cols-2 gap-2 pt-2">
+                <div className={`gap-2 pt-2 ${hasIncident ? 'grid grid-cols-1' : 'grid grid-cols-2'}`}>
                   <button
                     onClick={() => navigateToThreat(threat.id)}
                     className="w-full py-1.5 bg-blue-600/10 hover:bg-blue-600/20 text-blue-400 hover:text-blue-300 border border-blue-500/30 rounded text-xs font-semibold flex items-center justify-center gap-1 transition-all cursor-pointer"
@@ -191,17 +241,19 @@ export const ThreatsPage = () => {
                     <ArrowRight className="w-3.5 h-3.5" />
                   </button>
 
-                  <button
-                    onClick={() => createIncidentFromThreat(threat.id)}
-                    className="w-full py-1.5 bg-[#111217] hover:bg-white/5 text-gray-300 hover:text-white border border-white/10 rounded text-xs font-semibold flex items-center justify-center gap-1 transition-all cursor-pointer"
-                  >
-                    <FolderPlus className="w-3.5 h-3.5" />
-                    <span>Create Incident</span>
-                  </button>
+                  {!hasIncident && (
+                    <button
+                      onClick={() => createIncidentFromThreat(threat.id)}
+                      className="w-full py-1.5 bg-[#111217] hover:bg-white/5 text-gray-300 hover:text-white border border-white/10 rounded text-xs font-semibold flex items-center justify-center gap-1 transition-all cursor-pointer"
+                    >
+                      <FolderPlus className="w-3.5 h-3.5" />
+                      <span>Create Incident</span>
+                    </button>
+                  )}
                 </div>
               </div>
             </div>
-          ))}
+          )})}
         </div>
       )}
     </div>

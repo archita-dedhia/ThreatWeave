@@ -44,7 +44,7 @@ export const TopBar = () => {
       <div>
         <div className="flex items-center gap-2">
           <span className="text-[10px] font-mono uppercase text-blue-400 font-semibold tracking-wider">
-            UrbanSOC Platform
+            ThreatWeave Platform
           </span>
           <span className="text-gray-600 text-xs">/</span>
           <span className="text-xs text-gray-400 font-mono capitalize">

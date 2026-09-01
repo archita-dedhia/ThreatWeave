@@ -26,12 +26,31 @@ export const ThreatInvestigationPage = () => {
   const {
     threats,
     events,
+    incidents,
     selectedThreatId,
     setActivePage,
     navigateToThreat,
+    navigateToIncident,
     createIncidentFromThreat,
     executeResponseAction,
+    addToast,
   } = useSOC();
+
+  const getTimelineSeverityColor = (severity) => {
+    const s = (severity || 'info').toLowerCase();
+    switch (s) {
+      case 'critical':
+        return { dot: 'bg-red-500', line: 'bg-red-500/30', badge: 'bg-red-500/15 border-red-500/40 text-red-400' };
+      case 'high':
+        return { dot: 'bg-orange-500', line: 'bg-orange-500/30', badge: 'bg-orange-500/15 border-orange-500/40 text-orange-400' };
+      case 'medium':
+        return { dot: 'bg-yellow-500', line: 'bg-yellow-500/30', badge: 'bg-yellow-500/15 border-yellow-500/40 text-yellow-400' };
+      case 'low':
+        return { dot: 'bg-green-500', line: 'bg-green-500/30', badge: 'bg-green-500/15 border-green-500/40 text-green-400' };
+      default:
+        return { dot: 'bg-blue-500', line: 'bg-blue-500/30', badge: 'bg-blue-500/15 border-blue-500/40 text-blue-400' };
+    }
+  };
 
   const [activeEvidenceModal, setActiveEvidenceModal] = useState(null);
   const [activeEventModal, setActiveEventModal] = useState(null);
@@ -53,6 +72,8 @@ export const ThreatInvestigationPage = () => {
 
   // Correlated telemetry events
   const correlatedEvents = events.filter((e) => activeThreat.correlated_event_ids.includes(e.id));
+  const hasIncident = incidents.some((i) => i.threat_id === activeThreat.id);
+  const relatedIncident = incidents.find((i) => i.threat_id === activeThreat.id);
 
   return (
     <div className="space-y-6">
@@ -93,13 +114,23 @@ export const ThreatInvestigationPage = () => {
             </select>
           </div>
 
-          <button
-            onClick={() => createIncidentFromThreat(activeThreat.id)}
-            className="px-4 py-2 bg-blue-600 hover:bg-blue-500 text-white text-xs font-bold rounded-md shadow-md flex items-center gap-1.5 transition-all cursor-pointer"
-          >
-            <FolderPlus className="w-3.5 h-3.5" />
-            <span>Create Incident Dossier</span>
-          </button>
+          {hasIncident ? (
+            <button
+              onClick={() => relatedIncident && navigateToIncident(relatedIncident.id)}
+              className="px-4 py-2 bg-green-600 hover:bg-green-500 text-white text-xs font-bold rounded-md shadow-md flex items-center gap-1.5 transition-all cursor-pointer"
+            >
+              <FileText className="w-3.5 h-3.5" />
+              <span>View Incident Dossier ({relatedIncident?.id})</span>
+            </button>
+          ) : (
+            <button
+              onClick={() => createIncidentFromThreat(activeThreat.id)}
+              className="px-4 py-2 bg-blue-600 hover:bg-blue-500 text-white text-xs font-bold rounded-md shadow-md flex items-center gap-1.5 transition-all cursor-pointer"
+            >
+              <FolderPlus className="w-3.5 h-3.5" />
+              <span>Create Incident Dossier</span>
+            </button>
+          )}
         </div>
       </div>
 
@@ -313,87 +344,120 @@ export const ThreatInvestigationPage = () => {
         </div>
       </div>
 
-      {/* Correlated Events Timeline Table */}
+      {/* Correlated Events Timeline - Enhanced Visual */}
       <div className="p-5 bg-[#1A1C23] border border-white/10 rounded-lg space-y-4">
         <div className="flex items-center justify-between pb-3 border-b border-white/10">
-          <div>
-            <h3 className="text-sm font-bold text-white">Correlated Attack Sequence Timeline</h3>
-            <p className="text-xs text-gray-400">
-              Chronological log progression reconstructed by the AI Threat Reasoner
-            </p>
+          <div className="flex items-center gap-2">
+            <Clock className="w-4 h-4 text-blue-400" />
+            <div>
+              <h3 className="text-sm font-bold text-white">Chronological Attack Progression Timeline</h3>
+              <p className="text-xs text-gray-400">
+                Detailed event chain reconstructed by the AI Threat Reasoner with severity indicators
+              </p>
+            </div>
           </div>
-          <span className="text-xs font-mono text-gray-400">{correlatedEvents.length} Sequential Events</span>
+          <div className="flex items-center gap-2 text-xs font-mono">
+            <span className="px-2 py-1 bg-blue-600/10 text-blue-400 border border-blue-500/20 rounded">
+              {correlatedEvents.length} Events
+            </span>
+            <div className="hidden sm:flex items-center gap-2 text-[10px] text-gray-500">
+              <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-red-500"></span>Critical</span>
+              <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-orange-500"></span>High</span>
+              <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-yellow-500"></span>Medium</span>
+              <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-green-500"></span>Low</span>
+            </div>
+          </div>
         </div>
 
-        <div className="space-y-3">
-          {correlatedEvents.map((evt, idx) => {
-            const isExpanded = expandedTimelineId === evt.id;
+        {/* Vertical Timeline */}
+        <div className="relative pl-6 pr-1 py-2">
+          {/* Vertical line */}
+          <div className="absolute left-2 top-2 bottom-2 w-0.5 bg-gradient-to-b from-red-500/50 via-yellow-500/50 to-green-500/50 rounded-full" />
 
-            return (
-              <div
-                key={evt.id}
-                className="p-3.5 bg-[#111217] border border-white/10 rounded-lg hover:border-white/20 transition-all font-mono text-xs"
-              >
-                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
-                  <div className="flex items-center gap-3">
-                    <span className="w-6 h-6 rounded-full bg-blue-600/10 border border-blue-500/20 text-blue-400 font-bold flex items-center justify-center text-xs shrink-0">
-                      {idx + 1}
-                    </span>
-                    <div>
-                      <div className="flex items-center gap-2">
-                        <span className="text-white font-bold">{evt.event_type}</span>
-                        <span className="text-gray-500">|</span>
-                        <span className="text-gray-300 font-semibold">{evt.action}</span>
-                        <RiskBadge level={evt.severity} size="sm" />
-                      </div>
-                      <div className="text-[11px] text-gray-400 mt-0.5">
-                        <span className="text-gray-500">Actor:</span>{' '}
-                        <span className="text-white font-semibold">{evt.user}</span> &bull;{' '}
-                        <span className="text-gray-500">Source:</span>{' '}
-                        <span className="text-blue-400">{evt.source_ip}</span> &bull;{' '}
-                        <span className="text-gray-500">Target:</span> {evt.destination_ip}
+          <div className="space-y-0">
+            {correlatedEvents.map((evt, idx) => {
+              const isExpanded = expandedTimelineId === evt.id;
+              const colors = getTimelineSeverityColor(evt.severity);
+              const isLast = idx === correlatedEvents.length - 1;
+
+              return (
+                <div key={evt.id} className="relative pb-6">
+                  {/* Timeline Dot */}
+                  <div className={`absolute -left-4 top-3 w-4 h-4 rounded-full ${colors.dot} ring-4 ring-[#1A1C23] z-10 shadow-lg`} />
+
+                  {/* Timeline Event Card */}
+                  <div
+                    className={`ml-4 bg-[#111217] border border-white/10 rounded-lg hover:border-white/20 transition-all font-mono text-xs overflow-hidden`}
+                  >
+                    <div
+                      className="p-3 cursor-pointer"
+                      onClick={() => setExpandedTimelineId(isExpanded ? null : evt.id)}
+                    >
+                      <div className="flex flex-col sm:flex-row sm:items-start justify-between gap-2">
+                        <div className="flex-1">
+                          <div className="flex flex-wrap items-center gap-2 mb-1.5">
+                            <span className={`text-[10px] font-bold px-2 py-0.5 rounded border ${colors.badge}`}>
+                              STEP {idx + 1}
+                            </span>
+                            <span className="text-white font-bold text-[11px]">{evt.event_type}</span>
+                            <RiskBadge level={evt.severity} size="sm" />
+                          </div>
+                          <div className="flex flex-wrap items-center gap-2 text-[10px] text-gray-400">
+                            <span className="bg-white/5 px-1.5 py-0.5 rounded">
+                              <span className="text-gray-500">Action:</span> <span className="text-gray-300 font-semibold">{evt.action}</span>
+                            </span>
+                            <span>
+                              <span className="text-gray-500">Actor:</span>{' '}
+                              <span className="text-white font-semibold">{evt.user}</span>
+                            </span>
+                            <span>
+                              <span className="text-gray-500">Src:</span>{' '}
+                              <span className="text-blue-400">{evt.source_ip}</span>
+                            </span>
+                            <span>
+                              <span className="text-gray-500">Dst:</span> <span className="text-purple-400">{evt.destination_ip}</span>
+                            </span>
+                          </div>
+                        </div>
+
+                        <div className="flex items-center gap-3 shrink-0">
+                          <span className="text-gray-400 text-[10px] whitespace-nowrap">{evt.timestamp}</span>
+                          <span className={`p-1 text-gray-400 hover:text-white rounded transition-colors`}>
+                            {isExpanded ? <ChevronUp className="w-3.5 h-3.5" /> : <ChevronDown className="w-3.5 h-3.5" />}
+                          </span>
+                        </div>
                       </div>
                     </div>
-                  </div>
 
-                  <div className="flex items-center gap-3 self-end sm:self-center">
-                    <span className="text-gray-400 text-[11px]">{evt.timestamp}</span>
-                    <button
-                      onClick={() => setExpandedTimelineId(isExpanded ? null : evt.id)}
-                      className="p-1 text-gray-400 hover:text-white rounded transition-colors cursor-pointer"
-                    >
-                      {isExpanded ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
-                    </button>
+                    {isExpanded && (
+                      <div className="px-3 pb-3 pt-1 border-t border-white/5 space-y-2 text-[11px]">
+                        {evt.command && (
+                          <div className="p-2 bg-black/40 rounded">
+                            <span className="text-gray-500 block text-[10px] mb-1 uppercase">Command / Args</span>
+                            <code className="text-yellow-400 break-all">{evt.command}</code>
+                          </div>
+                        )}
+                        {evt.file && (
+                          <div className="p-2 bg-black/40 rounded">
+                            <span className="text-gray-500 block text-[10px] mb-1 uppercase">File Target</span>
+                            <code className="text-blue-300 break-all">{evt.file}</code>
+                          </div>
+                        )}
+                        {evt.raw_log && (
+                          <div className="p-2 bg-black/40 rounded">
+                            <span className="text-gray-500 block text-[10px] mb-1 uppercase">Raw Telemetry Log</span>
+                            <pre className="text-[10px] text-gray-300 whitespace-pre-wrap break-all">
+                              {evt.raw_log}
+                            </pre>
+                          </div>
+                        )}
+                      </div>
+                    )}
                   </div>
                 </div>
-
-                {isExpanded && (
-                  <div className="mt-3 pt-3 border-t border-white/10 space-y-2 text-[11px]">
-                    {evt.command && (
-                      <div>
-                        <span className="text-gray-500 block">Command / Args:</span>
-                        <code className="text-yellow-400 break-all">{evt.command}</code>
-                      </div>
-                    )}
-                    {evt.file && (
-                      <div>
-                        <span className="text-gray-500 block">File Target:</span>
-                        <code className="text-blue-300 break-all">{evt.file}</code>
-                      </div>
-                    )}
-                    {evt.raw_log && (
-                      <div>
-                        <span className="text-gray-500 block">Raw Telemetry Log:</span>
-                        <pre className="text-[10px] text-gray-300 bg-black/50 p-2 rounded whitespace-pre-wrap break-all">
-                          {evt.raw_log}
-                        </pre>
-                      </div>
-                    )}
-                  </div>
-                )}
-              </div>
-            );
-          })}
+              );
+            })}
+          </div>
         </div>
       </div>
 

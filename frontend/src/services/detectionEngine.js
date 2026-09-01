@@ -797,7 +797,7 @@ export function generateReportFromThreat(incident, threat, allEvents = []) {
     generated_at: new Date().toISOString().replace('T', ' ').slice(0, 19) + ' UTC',
     generated_by: incident.assigned_analyst || 'Lead SOC Analyst',
     threat_summary: threat.explanation.what_happened,
-    executive_summary: `UrbanSOC Agentic AI detected an active ${threat.risk_level} threat (${threat.title}) targeting ${threat.affected_user} on asset ${threat.affected_system}. The attack originated from ${threat.source} with a calculated risk score of ${threat.risk_score}/100 and ${threat.confidence}% confidence. Automated containment playbooks were compiled.`,
+    executive_summary: `ThreatWeave detected an active ${threat.risk_level} threat (${threat.title}) targeting ${threat.affected_user} on asset ${threat.affected_system}. The attack originated from ${threat.source} with a calculated risk score of ${threat.risk_score}/100 and ${threat.confidence}% confidence. Containment playbooks were compiled.`,
     threat_explanation: {
       non_technical: threat.explanation.what_happened + ' ' + threat.explanation.why_suspicious,
       technical: `Root Cause: Observed ${correlatedEvents.length} sequential telemetry events triggering heuristic & graph anomaly correlations. MITRE tactics: ${threat.mitre_tactics.join(', ')}. ${threat.explanation.risk_rationale}`,
@@ -823,6 +823,6 @@ export function generateReportFromThreat(incident, threat, allEvents = []) {
     ai_investigation_explanation: threat.explanation,
     recommended_response: threat.recommendations,
     incident_status: incident.status,
-    analyst_signoff: incident.assigned_analyst || 'Lead SOC Analyst (UrbanSOC AI Verified)',
+    analyst_signoff: incident.assigned_analyst || 'Lead SOC Analyst (ThreatWeave AI Verified)',
   };
 }

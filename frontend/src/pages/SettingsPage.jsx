@@ -33,6 +33,7 @@ export const SettingsPage = () => {
       aiModelMode: 'mock_ai',
       apiKey: '',
       syslogPort: 514,
+      mongoUri: import.meta.env.VITE_MONGO_URI || '',
     };
     setLocalSettings(defaults);
     updateSOCSettings(defaults);
@@ -166,11 +167,11 @@ export const SettingsPage = () => {
           </div>
         </div>
 
-        {/* Section 3: Autonomous Response Guardrails */}
+        {/* Section 3: Response Guardrails */}
         <div className="p-5 bg-[#1A1C23] border border-white/10 rounded-lg space-y-4">
           <div className="border-b border-white/10 pb-3">
             <h3 className="text-sm font-bold text-white uppercase tracking-wider font-mono">
-              3. Autonomous Containment Execution Guardrails
+              3. Containment Execution Guardrails
             </h3>
             <p className="text-xs text-gray-400">
               Safety policies controlling whether playbooks execute automatically or require Human-in-the-Loop
@@ -190,7 +191,7 @@ export const SettingsPage = () => {
             />
             <label htmlFor="autoContainment" className="text-xs space-y-1 cursor-pointer">
               <span className="text-white font-bold block">
-                Enable Autonomous Playbook Execution for High-Confidence Threats
+                Enable Playbook Execution for High-Confidence Threats
               </span>
               <p className="text-gray-400 font-sans leading-relaxed">
                 When enabled, containment actions (firewall block rules, token invalidation) tagged with
@@ -198,6 +199,43 @@ export const SettingsPage = () => {
                 click-to-execute confirmation.
               </p>
             </label>
+          </div>
+        </div>
+
+        {/* Section 4: MongoDB Persistence */}
+        <div className="p-5 bg-[#1A1C23] border border-white/10 rounded-lg space-y-4">
+          <div className="border-b border-white/10 pb-3">
+            <h3 className="text-sm font-bold text-white uppercase tracking-wider font-mono">
+              4. Database Persistence
+            </h3>
+            <p className="text-xs text-gray-400">
+              MongoDB connection string for persistent storage of events, threats &amp; incidents across sessions
+            </p>
+          </div>
+
+          <div className="space-y-2 text-xs font-mono">
+            <label className="text-gray-300 font-semibold block">
+              MongoDB Connection URI
+            </label>
+            <input
+              type="password"
+              placeholder="mongodb://user:pass@host:27017/threatweave?authSource=admin"
+              value={localSettings.mongoUri ?? ''}
+              onChange={(e) =>
+                setLocalSettings({ ...localSettings, mongoUri: e.target.value })
+              }
+              className="w-full p-2.5 bg-[#111217] border border-white/10 rounded text-gray-200 text-xs focus:border-blue-500 focus:outline-none"
+              spellCheck={false}
+              autoComplete="off"
+            />
+            <div className="flex items-start gap-2 text-[11px] text-gray-500 pt-1">
+              <Info className="w-3.5 h-3.5 mt-0.5 text-blue-400 flex-shrink-0" />
+              <p className="leading-relaxed">
+                Events, threats, and incidents are written to this MongoDB instance so they persist after page
+                reload. You can also set this via the <code className="text-blue-400">VITE_MONGO_URI</code> environment
+                variable.
+              </p>
+            </div>
           </div>
         </div>
 
