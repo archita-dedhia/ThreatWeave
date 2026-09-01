@@ -37,7 +37,7 @@ threatweave/
 - Google Generative AI API
 
 ### Backend
-- Express.js
+- fast api
 - TypeScript
 - Node.js
 

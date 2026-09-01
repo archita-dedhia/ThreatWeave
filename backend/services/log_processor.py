@@ -4,8 +4,15 @@ import pandas as pd
 import numpy as np
 from typing import List, Dict, Any
 
-DATA_DIR = os.path.join(os.path.dirname(os.path.dirname(__file__)), "data")
-DATA_FILE = os.path.join(DATA_DIR, "ThreatWeave_security_logs.csv")
+# Resolve DATA_DIR across different working directories
+POSSIBLE_PATHS = [
+    os.path.join(os.path.dirname(os.path.dirname(__file__)), "data", "ThreatWeave_security_logs.csv"),
+    os.path.join(os.path.dirname(__file__), "..", "data", "ThreatWeave_security_logs.csv"),
+    os.path.join(os.getcwd(), "backend", "data", "ThreatWeave_security_logs.csv"),
+    os.path.join(os.getcwd(), "data", "ThreatWeave_security_logs.csv"),
+]
+
+DATA_FILE = next((p for p in POSSIBLE_PATHS if os.path.isfile(p)), POSSIBLE_PATHS[0])
 
 def check_dataset_exists() -> bool:
     """Check if the actual dataset file exists."""
@@ -14,6 +21,10 @@ def check_dataset_exists() -> bool:
 def load_security_logs() -> pd.DataFrame:
     """Load and clean the security logs CSV file."""
     if not check_dataset_exists():
+        # Search again in case working directory changed
+        for p in POSSIBLE_PATHS:
+            if os.path.isfile(p):
+                return pd.read_csv(p).replace({np.nan: None})
         raise FileNotFoundError(f"Dataset not found at {DATA_FILE}")
     
     df = pd.read_csv(DATA_FILE)

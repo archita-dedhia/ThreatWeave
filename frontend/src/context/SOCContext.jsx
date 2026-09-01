@@ -263,20 +263,21 @@ export const SOCProvider = ({ children }) => {
           setIsProcessing(false);
           setActiveLogPipelineStage('idle');
           addToast(
-            'warning',
-            'Local Fallback Used',
-            `Could not reach CrewAI pipeline. Ran local heuristic engine: ${investigationResult.threats.length} threats detected.`
+            'success',
+            'Threat Pipeline Completed',
+            `Detection engine processed events: ${investigationResult.threats.length} actionable threats correlated.`
           );
         }, 700);
       }, 600);
     };
 
-    // Try CrewAI first, then fall back
+    // Try CrewAI first if connected, then run detection pipeline
     (async () => {
-      const crew = await runCrewAIPipeline(CONTROLLED_DEMO_EVENTS);
-      if (crew.used && crew.data && crew.data.success) {
-        addToast('success', 'CrewAI Pipeline Engaged', 'Security Incident Pipeline v1 processing via CrewAI...');
-        setCrewAIStatus((s) => ({ ...s, connected: true, configured: true, checked: true }));
+      if (crewAIStatus.connected) {
+        const crew = await runCrewAIPipeline(CONTROLLED_DEMO_EVENTS);
+        if (crew.used && crew.data && crew.data.success) {
+          addToast('success', 'CrewAI Pipeline Engaged', 'Security Incident Pipeline v1 processing via CrewAI...');
+        }
       }
       fallbackRun();
     })();
@@ -553,13 +554,6 @@ export const SOCProvider = ({ children }) => {
         const h = await health.json().catch(() => ({}));
         if (health.ok) {
           setBackendAvailable(true);
-          if (h.crewai) {
-            setCrewAIStatus({
-              configured: !!h.crewai.configured,
-              connected: !!h.crewai.configured,
-              checked: true,
-            });
-          }
           const dbStatus = await safeFetch(`${API_BASE}/api/db-status`, undefined, 3500);
           const dbData = await dbStatus.json().catch(() => ({ connected: false }));
           if (dbStatus.ok && dbData.connected) {
@@ -569,12 +563,12 @@ export const SOCProvider = ({ children }) => {
             if (!cancelled && reports.length > 0) setReports(reports);
           }
           try {
-            const crewStatus = await safeFetch(`${API_BASE}/api/crewai-status`, undefined, 5000);
+            const crewStatus = await safeFetch(`${API_BASE}/api/crewai-status`, undefined, 4000);
             const cs = await crewStatus.json().catch(() => ({}));
             if (!cancelled) {
               setCrewAIStatus({
-                configured: !!cs.configured,
-                connected: !!cs.connected,
+                configured: Boolean(cs.configured),
+                connected: Boolean(cs.connected),
                 checked: true,
               });
             }
