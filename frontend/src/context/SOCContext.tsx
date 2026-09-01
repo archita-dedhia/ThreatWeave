@@ -18,6 +18,7 @@ import {
   runThreatInvestigationAgent,
   generateReportFromThreat,
 } from '../services/detectionEngine';
+import { fetchLogs, fetchThreats } from '../services/apiClient';
 
 interface SOCContextType {
   // State
@@ -243,85 +244,145 @@ export const SOCProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     setActivePage('reports');
   };
 
-  // LOAD CONTROLLED DEMO DATASET
+  // LOAD CONTROLLED DEMO DATASET (NOW FETCHES FROM FASTAPI BACKEND)
   const loadDemoDataset = async () => {
     setIsProcessing(true);
     setProcessingProgress(15);
     setActiveLogPipelineStage(1);
 
-    addToast('info', 'Controlled Demo Dataset', 'Ingesting SIH 2026 test security events suite...');
+    addToast('info', 'Live API Connection', 'Fetching data from ThreatWeave Backend...');
 
-    // Simulate orchestrated agent execution stages with realistic high-speed progress
-    await new Promise((r) => setTimeout(r, 400));
-    setProcessingProgress(35);
-    setActiveLogPipelineStage(2);
+    try {
+      // 1. Fetch Logs
+      setLogAgentState((prev) => ({
+        ...prev,
+        status: 'analyzing',
+        current_task: 'Fetching logs from backend...',
+        input_summary: `Connecting to http://127.0.0.1:8000/logs`,
+      }));
 
-    // Agent 1: Run Log Analysis Agent
-    setLogAgentState((prev) => ({
-      ...prev,
-      status: 'analyzing',
-      current_task: 'Extracting field indicators, anomaly scores, and authentications...',
-      input_summary: `${CONTROLLED_DEMO_EVENTS.length} multi-source events (SSH, Winlogon, Sysmon, Auditd, Kernel)`,
-    }));
+      const backendLogs = await fetchLogs();
+      
+      const mappedEvents: SecurityEvent[] = backendLogs.map((log: any, idx: number) => ({
+        id: `EVT-${Date.now()}-${idx + 1}`,
+        timestamp: log.timestamp || new Date().toISOString(),
+        source_ip: log.source_ip || 'unknown',
+        destination_ip: log.destination_ip || 'unknown',
+        user: log.user || 'system',
+        event_type: log.event_type || 'SYSTEM_EVENT',
+        action: log.action || 'LOG',
+        status: (log.status?.toUpperCase() === 'FAILED' ? 'FAILURE' : 'SUCCESS') as any,
+        severity: (log.status?.toUpperCase() === 'FAILED' ? 'high' : 'info') as any,
+        process: log.process,
+        command: log.command,
+        file: log.file,
+        bytes_transferred: log.bytes_transferred || 0,
+        raw_log: JSON.stringify(log),
+        is_suspicious: log.status?.toUpperCase() === 'FAILED'
+      }));
 
-    await new Promise((r) => setTimeout(r, 450));
-    setProcessingProgress(60);
-    setActiveLogPipelineStage(3);
+      setProcessingProgress(50);
+      setActiveLogPipelineStage(3);
+      setEvents(mappedEvents);
 
-    const logAgentResult = runLogAnalysisAgent(CONTROLLED_DEMO_EVENTS, settings);
+      setLogAgentState({
+        name: 'Backend Log Sync',
+        role: 'Data Fetcher',
+        status: 'completed',
+        input_summary: `Fetched ${mappedEvents.length} events from backend`,
+        output_summary: `Logs synced successfully`,
+        processing_time_ms: 100,
+        last_active: new Date().toLocaleTimeString(),
+        model_provider: 'FastAPI Backend',
+        current_task: 'Logs fetched',
+      });
 
-    setEvents(logAgentResult.enrichedEvents);
-    setLogAgentState({
-      name: 'Log Analysis Agent',
-      role: 'Log Preprocessing, Ingestion Normalization & Anomaly Detection',
-      status: 'completed',
-      input_summary: `Ingested ${CONTROLLED_DEMO_EVENTS.length} normalized security log events`,
-      output_summary: `Identified ${logAgentResult.suspiciousEvents.length} suspicious anomalies across 3 distinct subnets`,
-      processing_time_ms: logAgentResult.metrics.runtimeMs,
-      last_active: new Date().toLocaleTimeString(),
-      model_provider: 'UrbanSOC Heuristic Engine v2.6',
-      current_task: 'Cycle finished. Emitted suspicious events envelope.',
-    });
+      // 2. Fetch Threats
+      setInvestigationAgentState((prev) => ({
+        ...prev,
+        status: 'analyzing',
+        current_task: 'Fetching threats from backend...',
+        input_summary: `Connecting to http://127.0.0.1:8000/threats`,
+      }));
 
-    // Agent 2: Run Threat Investigation Agent
-    setInvestigationAgentState((prev) => ({
-      ...prev,
-      status: 'analyzing',
-      current_task: 'Correlating attack chains, mapping MITRE ATT&CK tactics, and evaluating risk weights...',
-      input_summary: `${logAgentResult.suspiciousEvents.length} suspicious events from Log Analysis Agent`,
-    }));
+      const backendThreats = await fetchThreats();
+      
+      const mappedThreats: Threat[] = backendThreats.map((bt: any, idx: number) => {
+        const threatId = `THR-API-${Date.now()}-${idx + 1}`;
+        return {
+          id: threatId,
+          title: bt.threat_type,
+          type: bt.threat_type,
+          risk_level: bt.risk_level as any,
+          risk_score: bt.risk_score,
+          confidence: 90,
+          affected_user: bt.log_entry?.user || 'unknown',
+          affected_system: bt.log_entry?.destination_ip || 'unknown',
+          source: bt.log_entry?.source_ip || 'unknown',
+          correlated_event_ids: [],
+          evidence: [{
+            id: `EVD-${threatId}`,
+            title: bt.reason,
+            event_id: 'N/A',
+            timestamp: bt.log_entry?.timestamp || new Date().toISOString(),
+            type: bt.threat_type,
+            description: bt.reason,
+            extracted_value: JSON.stringify(bt.log_entry),
+            source_field: 'API Backend',
+            raw_snippet: JSON.stringify(bt.log_entry),
+            severity: bt.risk_level.toLowerCase() as any
+          }],
+          risk_breakdown: {
+            base_score: bt.risk_score,
+            factors: [{ name: 'Backend Rule Match', score: bt.risk_score, weight: '100%', description: bt.reason }],
+            justification: 'Threat detected by FastAPI backend rule engine'
+          },
+          explanation: {
+            what_happened: bt.reason,
+            why_suspicious: bt.reason,
+            connected_events: 'Identified by backend',
+            risk_rationale: 'Backend assigned risk',
+            attack_vector_summary: bt.threat_type
+          },
+          recommendations: [{
+            id: `REC-${threatId}`,
+            category: 'Investigation Actions',
+            action: 'Review backend logs for more details',
+            reason: bt.reason,
+            priority: 'HIGH',
+            target: 'Backend API',
+            status: 'pending'
+          }],
+          status: 'active',
+          detected_at: new Date().toISOString(),
+          mitre_tactics: []
+        };
+      });
 
-    await new Promise((r) => setTimeout(r, 500));
-    setProcessingProgress(85);
-    setActiveLogPipelineStage(4);
+      setThreats(mappedThreats);
+      
+      setInvestigationAgentState({
+        name: 'Backend Threat Sync',
+        role: 'Threat Fetcher',
+        status: 'completed',
+        input_summary: `Fetched ${mappedThreats.length} threats from backend`,
+        output_summary: `Threats synced successfully`,
+        processing_time_ms: 100,
+        last_active: new Date().toLocaleTimeString(),
+        model_provider: 'FastAPI Backend',
+        current_task: 'Threats fetched',
+      });
 
-    const invAgentResult = runThreatInvestigationAgent(logAgentResult.suspiciousEvents, logAgentResult.enrichedEvents, settings);
+      setProcessingProgress(100);
+      setActiveLogPipelineStage(5);
+      
+      addToast('success', 'Backend Data Synced', `Fetched ${mappedEvents.length} logs and ${mappedThreats.length} threats.`);
 
-    setThreats(invAgentResult.threats);
-    setAgentLogs([...logAgentResult.logs, ...invAgentResult.logs]);
-    setAgentMessages(invAgentResult.messages);
-
-    setInvestigationAgentState({
-      name: 'Threat Investigation Agent',
-      role: 'Cross-Event Temporal Correlation, MITRE ATT&CK Mapping & Evidence-Backed Reasoning',
-      status: 'completed',
-      input_summary: `Evaluated ${logAgentResult.suspiciousEvents.length} suspicious event signatures`,
-      output_summary: `Reconstructed ${invAgentResult.threats.length} coordinated multi-stage attack chains`,
-      processing_time_ms: 38,
-      last_active: new Date().toLocaleTimeString(),
-      model_provider: 'UrbanSOC Agentic Reasoner v2.6',
-      current_task: 'Analysis finalized. Actionable playbooks & evidence dossiers generated.',
-    });
-
-    setProcessingProgress(100);
-    setActiveLogPipelineStage(5);
-    setIsProcessing(false);
-
-    addToast(
-      'success',
-      'AI Analysis Complete',
-      `Identified ${invAgentResult.threats.length} active threats from ${CONTROLLED_DEMO_EVENTS.length} events with full evidence chains.`
-    );
+    } catch (error: any) {
+      addToast('danger', 'API Error', `Failed to fetch from backend: ${error.message}`);
+    } finally {
+      setIsProcessing(false);
+    }
   };
 
   // INGEST CUSTOM RAW LOGS
